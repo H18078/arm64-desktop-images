@@ -1,0 +1,80 @@
+name: Build images
+
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: Images to build, separated by spaces
+        default: debian-kde ubuntu-gnome arch-kde
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      images: ${{ steps.tag.outputs.images }}
+    steps:
+      - id: tag
+        env:
+          IMAGES: ${{ inputs.images }}
+        run: |
+          tag="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "images=$(printf '%s\n' $IMAGES | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          gh release create "$tag" --draft --title "$tag" \
+            --notes "Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  build:
+    needs: release
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.release.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost
+          df -h /
+      - name: Build ${{ matrix.image }}
+        run: ./build/in-container.sh ${{ matrix.image }} out
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*
+      - name: Upload
+        run: gh release upload "${{ needs.release.outputs.tag }}" out/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.image }}
+          path: out/${{ matrix.image }}.json
+
+  publish:
+    needs: [release, build]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: images
+          merge-multiple: true
+      - name: Catalog
+        run: python3 build/catalog.py "${{ needs.release.outputs.tag }}" images > catalog.json
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: catalog.json
+      - name: Publish
+        run: |
+          tag="${{ needs.release.outputs.tag }}"
+          gh release upload "$tag" catalog.json
+          gh release edit "$tag" --draft=false --latest

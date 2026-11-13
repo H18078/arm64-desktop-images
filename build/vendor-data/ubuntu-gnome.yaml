@@ -1,0 +1,8 @@
+#cloud-config
+# Straight into the owner's GNOME session.
+write_files:
+  - path: /etc/gdm3/custom.conf
+    content: |
+      [daemon]
+      AutomaticLoginEnable=true
+      AutomaticLogin={{user}}

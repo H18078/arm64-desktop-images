@@ -1,0 +1,8 @@
+#cloud-config
+# Straight into the owner's Plasma session.
+write_files:
+  - path: /etc/sddm.conf.d/autologin.conf
+    content: |
+      [Autologin]
+      User={{user}}
+      Session=plasma
