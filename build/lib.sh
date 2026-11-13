@@ -19,6 +19,11 @@ common_rootfs() {
 datasource_list: [ NoCloud, None ]
 network: {config: disabled}
 EOF
+    # The seed stays attached; the desktop doesn't show it as a drive.
+    mkdir -p "$root/etc/udev/rules.d"
+    cat > "$root/etc/udev/rules.d/90-hide-cidata.rules" <<'EOF'
+ENV{ID_FS_LABEL}=="CIDATA|cidata", ENV{UDISKS_IGNORE}="1"
+EOF
 
     # A login prompt on the serial console, advertising xterm-256color: what
     # the other end of the console emulates.
