@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       images:
-        description: Images to build, separated by spaces
-        default: debian-kde ubuntu-gnome arch-kde
+        description: Images in the catalog, separated by spaces
+        default: debian-kde debian-xfce ubuntu-gnome arch-kde arch-xfce omarchy
+      rebuild:
+        description: Rebuild only images whose recipe changed since the last release, or all of them
+        type: choice
+        options: [changed, all]
+        default: changed
 
 permissions:
   contents: write
@@ -17,30 +22,44 @@ env:
   GH_REPO: ${{ github.repository }}
 
 jobs:
+  # Decides what to build: images whose recipe (build/recipe.py) differs from
+  # the one the latest release built them from. The others are reused where
+  # they are.
   release:
     runs-on: ubuntu-24.04-arm
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      images: ${{ steps.tag.outputs.images }}
+      tag: ${{ steps.plan.outputs.tag }}
+      build: ${{ steps.plan.outputs.build }}
     steps:
-      - id: tag
+      - uses: actions/checkout@v4
+      - id: plan
         env:
           IMAGES: ${{ inputs.images }}
+          REBUILD: ${{ inputs.rebuild }}
         run: |
+          mkdir -p plan
+          gh release download --pattern catalog.json --dir plan || echo '{"images": []}' > plan/catalog.json
+          python3 build/plan.py "$REBUILD" plan/catalog.json $IMAGES > plan/plan.json
+          cat plan/plan.json
           tag="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "images=$(printf '%s\n' $IMAGES | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "build=$(jq -c .build plan/plan.json)" >> "$GITHUB_OUTPUT"
           gh release create "$tag" --draft --title "$tag" \
             --notes "Built by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: plan/
 
   build:
     needs: release
+    if: needs.release.outputs.build != '[]'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        image: ${{ fromJSON(needs.release.outputs.images) }}
+        image: ${{ fromJSON(needs.release.outputs.build) }}
     steps:
       - uses: actions/checkout@v4
       - name: Make room
@@ -56,20 +75,33 @@ jobs:
         run: gh release upload "${{ needs.release.outputs.tag }}" out/*
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.image }}
+          name: image-${{ matrix.image }}
           path: out/${{ matrix.image }}.json
 
+  # Runs even when a build failed: that image keeps its entry from the
+  # previous catalog, if it had one, so one image can't hold back the rest.
   publish:
     needs: [release, build]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          name: plan
+          path: plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
           path: images
           merge-multiple: true
       - name: Catalog
-        run: python3 build/catalog.py "${{ needs.release.outputs.tag }}" images > catalog.json
+        env:
+          IMAGES: ${{ inputs.images }}
+        run: |
+          mkdir -p images
+          python3 build/catalog.py "${{ needs.release.outputs.tag }}" images plan/catalog.json $IMAGES > catalog.json
+          jq '.images[] | {id, release, built}' catalog.json
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: catalog.json

@@ -4,7 +4,7 @@
 #
 #     build/in-container.sh IMAGE OUT
 #
-# IMAGE is a script in build/ (debian-kde, ubuntu-gnome, arch-kde, omarchy);
+# IMAGE is a script in build/ (debian-kde, arch-xfce, omarchy and so on);
 # OUT is where its release files go.
 set -euo pipefail
 image="$1"

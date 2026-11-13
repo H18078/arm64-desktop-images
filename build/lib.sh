@@ -48,6 +48,37 @@ EOF
     rm -rf "$root/var/lib/cloud"
 }
 
+# For an X11 desktop: the screen takes the size the machine prefers whenever
+# the machine changes it, as a Wayland desktop does by itself. The display is
+# replugged with a new preferred mode; udev hears it, and a service (outside
+# udev's sandbox, which can't reach the X server) asks X for that mode.
+#   ROOT  the root filesystem
+x11_follows_display() {
+    local root="$1"
+    cat > "$root/usr/local/bin/follow-display" <<'EOF'
+#!/bin/sh
+# The X screen on LightDM's display, at its output's preferred mode.
+auth=/run/lightdm/root/:0
+[ -e "$auth" ] || exit 0
+export DISPLAY=:0 XAUTHORITY="$auth"
+output=$(xrandr | awk '/ connected/ { print $1; exit }')
+[ -n "$output" ] && xrandr --output "$output" --auto
+EOF
+    chmod 755 "$root/usr/local/bin/follow-display"
+    cat > "$root/etc/systemd/system/follow-display.service" <<'EOF'
+[Unit]
+Description=Give the X screen the display's preferred size
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/follow-display
+EOF
+    mkdir -p "$root/etc/udev/rules.d"
+    cat > "$root/etc/udev/rules.d/90-follow-display.rules" <<'EOF'
+ACTION=="change", SUBSYSTEM=="drm", ENV{HOTPLUG}=="1", RUN+="/usr/bin/systemctl --no-block start follow-display.service"
+EOF
+}
+
 # Runs a command inside ROOT, with /proc, /sys, /dev and DNS as a chroot needs
 # them for package installs, and takes them away again.
 #   ROOT CMD...
