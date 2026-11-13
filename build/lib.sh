@@ -188,6 +188,10 @@ image = {
 if os.path.exists(vendor_data):
     image["vendorData"] = open(vendor_data).read()
 json.dump(image, open(f"{id_}.json", "w"), indent=2)
+# Readable by the runner's user, which attests and uploads them.
+for path in os.listdir("."):
+    if path.startswith(id_):
+        os.chmod(path, 0o644)
 print(json.dumps(image, indent=2))
 EOF
 }
