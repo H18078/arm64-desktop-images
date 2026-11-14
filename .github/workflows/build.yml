@@ -5,7 +5,7 @@ on:
     inputs:
       images:
         description: Images in the catalog, separated by spaces
-        default: debian-kde debian-xfce ubuntu-gnome arch-kde arch-xfce omarchy
+        default: debian-kde debian-xfce debian-xfce-minimal ubuntu-gnome arch-kde arch-xfce omarchy
       rebuild:
         description: Rebuild only images whose recipe changed since the last release, or all of them
         type: choice

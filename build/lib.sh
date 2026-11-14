@@ -42,6 +42,21 @@ EOF
 After=cloud-config.service
 EOF
 
+    # cloud-init sets the machine up on its first boot, then switches itself
+    # off once its last stage is done, however that went: later boots don't
+    # run its stages, which the display manager would otherwise wait for.
+    cat > "$root/etc/systemd/system/cloud-init-once.service" <<'EOF'
+[Unit]
+Description=Switch cloud-init off once it has set this machine up
+After=cloud-final.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/touch /etc/cloud/cloud-init.disabled
+EOF
+    mkdir -p "$root/etc/systemd/system/cloud-final.service.wants"
+    ln -sfn ../cloud-init-once.service "$root/etc/systemd/system/cloud-final.service.wants/cloud-init-once.service"
+
     # Each machine makes its own identity on its first boot.
     : > "$root/etc/machine-id"
     rm -f "$root/var/lib/dbus/machine-id" "$root"/etc/ssh/ssh_host_*
@@ -77,6 +92,36 @@ EOF
     cat > "$root/etc/udev/rules.d/90-follow-display.rules" <<'EOF'
 ACTION=="change", SUBSYSTEM=="drm", ENV{HOTPLUG}=="1", RUN+="/usr/bin/systemctl --no-block start follow-display.service"
 EOF
+}
+
+# Debian 13 (trixie) with Xfce, on X11 with LightDM: what debian-xfce and
+# debian-xfce-minimal are both made from.
+#   ROOT  the root filesystem to make (absent)
+debian_xfce_rootfs() {
+    local root="$1" mirror=http://deb.debian.org/debian
+    mmdebstrap --arch=arm64 --variant=important --mode=root \
+        --include=linux-image-arm64,systemd-sysv,systemd-resolved,dbus,sudo,locales,ca-certificates,cloud-init,network-manager,openssh-server \
+        trixie "$root" \
+        "deb $mirror trixie main contrib non-free-firmware" \
+        "deb $mirror trixie-updates main contrib non-free-firmware" \
+        "deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware"
+
+    # Xfce with what it recommends, but no software centre: its update checks
+    # and Flatpak are slow to start and of no use here.
+    cat > "$root/etc/apt/preferences.d/no-software-centre" <<'EOF'
+Package: gnome-software* packagekit* flatpak*
+Pin: release *
+Pin-Priority: -1
+EOF
+    in_root "$root" apt-get update
+    in_root "$root" env DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
+        xfce4 xfce4-terminal mousepad network-manager-gnome lightdm lightdm-gtk-greeter \
+        xserver-xorg x11-xserver-utils firefox-esr fonts-noto-core mesa-utils
+
+    in_root "$root" systemctl set-default graphical.target
+    in_root "$root" apt-mark hold linux-image-arm64 "$(basename "$(ls -d "$root"/lib/modules/* | head -1)" | sed 's/^/linux-image-/')"
+    echo 'LANG=C.UTF-8' > "$root/etc/default/locale"
+    x11_follows_display "$root"
 }
 
 # Runs a command inside ROOT, with /proc, /sys, /dev and DNS as a chroot needs
