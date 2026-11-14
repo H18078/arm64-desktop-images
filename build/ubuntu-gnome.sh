@@ -12,16 +12,18 @@ mirror=http://ports.ubuntu.com/ubuntu-ports
 rm -rf "$work"
 mkdir -p "$work"
 
-# No snaps: snapd wants a kernel and confinement this machine doesn't give it,
-# and Ubuntu's Firefox and Thunderbird debs only install the snaps.
-no_snaps='mkdir -p "$1/etc/apt/preferences.d" && printf "Package: snapd firefox thunderbird chromium-browser\nPin: release *\nPin-Priority: -1\n" > "$1/etc/apt/preferences.d/no-snaps"'
+# snapd is in, for installing snaps once the VM runs: the image boots Ubuntu's
+# own kernel, with the squashfs, loop devices and AppArmor snaps need. Ubuntu's
+# Firefox, Thunderbird and Chromium debs stay out: each only installs its snap,
+# which can't happen while the image is built. Install those snaps instead.
+no_snap_debs='mkdir -p "$1/etc/apt/preferences.d" && printf "Package: firefox thunderbird chromium-browser\nPin: release *\nPin-Priority: -1\n" > "$1/etc/apt/preferences.d/no-snap-debs"'
 
 # The virtual kernel: the generic one without its firmware, which a VM has no
 # use for. initramfs-tools rather than dracut, whose host-only images would
 # fit the machine building this one.
 mmdebstrap --arch=arm64 --variant=important --mode=root \
     --keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg \
-    --setup-hook="$no_snaps" \
+    --setup-hook="$no_snap_debs" \
     --include=initramfs-tools,linux-image-virtual,systemd-sysv,dbus,sudo,locales,ca-certificates,cloud-init,network-manager,openssh-server \
     resolute "$root" \
     "deb $mirror resolute main restricted universe" \
@@ -38,7 +40,7 @@ in_root "$root" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-insta
     xdg-desktop-portal-gnome xdg-utils libglib2.0-bin gsettings-ubuntu-schemas \
     yaru-theme-gnome-shell yaru-theme-gtk yaru-theme-icon yaru-theme-sound ubuntu-wallpapers \
     fonts-ubuntu fonts-noto-core fonts-noto-color-emoji policykit-desktop-privileges \
-    mesa-utils
+    mesa-utils snapd
 
 in_root "$root" systemctl set-default graphical.target
 kernel=$(basename "$(ls -d "$root"/usr/lib/modules/* | head -1)")
