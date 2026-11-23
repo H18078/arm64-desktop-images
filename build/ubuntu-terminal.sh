@@ -26,6 +26,18 @@ mmdebstrap --arch=arm64 --variant=important --mode=root \
     "deb $mirror resolute-updates main restricted universe" \
     "deb $mirror resolute-security main restricted universe"
 
+# Ubuntu's NetworkManager ships with every device but Wi-Fi, GSM and CDMA
+# unmanaged, expecting netplan or systemd-networkd to run Ethernet. This image
+# has neither, so without this eth0 would never get DHCP. The rule is removed,
+# and an /etc override keeps Ethernet managed if a package upgrade puts it back.
+rm -f "$root"/usr/lib/NetworkManager/conf.d/10-globally-managed-devices.conf
+mkdir -p "$root"/etc/NetworkManager/conf.d
+cat > "$root"/etc/NetworkManager/conf.d/99-manage-ethernet.conf <<'EOF'
+[keyfile]
+unmanaged-devices=*,except:type:ethernet
+EOF
+in_root "$root" systemctl enable NetworkManager.service systemd-resolved.service
+
 # No desktop: the console is where a user lands.
 in_root "$root" systemctl set-default multi-user.target
 kernel=$(basename "$(ls -d "$root"/usr/lib/modules/* | head -1)")
